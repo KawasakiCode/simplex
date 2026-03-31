@@ -1,8 +1,35 @@
 import numpy as np
 
-#Step 1: Initialize variables (for min problems only)
-#for max problems multiply c by -1 and the final z by -1 too
-c = np.array([-3, -1, 0, 0])
+# ============================================================
+# REVISED PRIMAL SIMPLEX ALGORITHM
+#
+# Solves problems in standard form:
+#   min { c^T x : Ax = b, x >= 0 }
+#
+# For MAX problems: negate c before running, then negate z at
+# the end to recover the true maximum value.
+# ============================================================
+
+# ----------------------------------------------------------
+# STEP 0 — INITIALIZATION
+#
+# Define the problem data and choose an initial basis B.
+# B must index m linearly independent columns of A so that
+# the basis matrix AB = A[:, B] is invertible (rank(AB) = m).
+#
+# This example encodes:   max 3x1 + x2
+#                  s.t.   x1 +  x2 <= 2
+#                         2x1 + x2 <= 4
+#                         x1, x2 >= 0
+#
+# After adding slack variables x3 and x4 the standard form is:
+#   min -3x1 - x2  (c negated to convert max -> min)
+#   s.t. x1 + x2 + x3       = 2
+#        2x1 + x2      + x4  = 4
+#        x1, x2, x3, x4 >= 0
+# ----------------------------------------------------------
+
+c = np.array([-3, -1, 0, 0])   # cost vector (negated for max->min)
 
 A = np.array([
     [1, 1, 1, 0],
@@ -11,73 +38,117 @@ A = np.array([
 
 b = np.array([2, 4])
 
-#In the B list put as many variables as restrictions you have
-#Make sure that the array these 2 variables make can be reversed
-#In this example take the 2 and 3rd columns of the A array which is 
-#[[1, 0], [0, 1]] which is reversible. Note that python counts from 0 so the 
-#2nd column is the actual third one.
-B = [2, 3]
-N = [0, 1]
+# Initial basis: columns 2 and 3 (0-indexed) correspond to the
+# slack variables x3 and x4. AB = I (identity), which is trivially
+# invertible and gives the initial basic feasible solution xB = b >= 0.
+B = [2, 3]   # basis index set  (|B| = m)
+N = [0, 1]   # non-basis index set  (|N| = n - m)
 
+# ----------------------------------------------------------
+# MAIN LOOP — each iteration is one pivot
+# ----------------------------------------------------------
 while True:
-    #Create the necessary arrays
-    #cB = c[B] works by grabbing data from c only in the indexes that are in B
-    #in this example cB becomes [0, 0] 
+
+    # Partition c and A according to the current basis B and non-basis N.
+    # cB, cN  — cost sub-vectors for basic / non-basic variables
+    # AB, AN  — sub-matrices of A for basic / non-basic columns
     cB = c[B]
     cN = c[N]
-    #Same logic applies here
-    #The : grabs all elements from the columns that B has in it
-    #In this example A[:, 2] grabs the 3rd column from A so [1, 0]^T
     AB = A[:, B]
     AN = A[:, N]
 
-    #Step 2: Calculate reverse array and the basic solution
-    AB_reverse = np.linalg.inv(AB)
-    xB = AB_reverse @ b
+    # Compute the inverse of the basis matrix AB^{-1}
+    AB_inv = np.linalg.inv(AB)
 
-    #Step 3: Calculate the dual and slack variables
-    w_transpose = cB.transpose() @ AB_reverse
-    sN = cN.transpose() - (w_transpose @ AN)
+    # Current basic feasible solution: xB = AB^{-1} b
+    # Non-basic variables are all zero: xN = 0
+    xB = AB_inv @ b
 
-    #Step 4: Check solution
-    #If sN has no negative elements then xB is the best solution and z the min value
-    if(np.min(sN) >= 0):
-        print(f"Variables: ${xB}")
-        z = cB @ xB
-        print(f"Min value is: ${z}")
-        break;
-    #If sN has at least one negative element then the solution can get better
-    else: 
-        #Dantzig rule: Incoming variable
-        #Find the position of the min element of sN and put it in t
-        t = np.argmin(sN)
-        #l is the incoming variable which will be inserted into B in next steps
-        l = N[t]
+    # Dual variables (shadow prices):  w^T = (cB)^T * AB^{-1}
+    w_T = cB @ AB_inv
 
-        #Outgoing variable
-        #hl is the pivot column
-        hl = AB_reverse @ A[:, l] 
-        #If all hl elements are below 0 then the problem is unbounded and has no best solution
-        if(np.max(hl) <= 0):
-            print("Unbounded problem")
-            break;
-        #If all hl elements are above 0 then we find the outgoing variable
-        else: 
-            #Here we make a new array ratios with the same shape as xB and every element as infinite
-            ratios = np.full(xB.shape, np.inf)
-            
-            #This mask acts as a boolean restriction to ensure hl is always above 0 so that it doesnt divide by 0
-            mask = hl > 0
-            #Get all the division results into ratios
-            ratios[mask] = xB[mask] / hl[mask]
-            #Find the position of the min element of the ratios array
-            r = np.argmin(ratios)
-            #K is the outgoing variable
-            k = B[r]
+    # Dual slack variables (reduced costs) for non-basic columns:
+    #   sN = (cN)^T - (cB)^T * AB^{-1} * AN
+    sN = cN - w_T @ AN
 
-            #Put the incoming variable into B and the outgoing into N
-            B[r] = l
-            N[t] = k
+    # ----------------------------------------------------------
+    # STEP 1 — OPTIMALITY TEST
+    #
+    # Theorem: the current basic solution (xB, xN=0)
+    # is optimal for the min problem if:
+    #   xB >= 0  (feasibility, guaranteed by construction)  AND
+    #   sN >= 0  (all reduced costs non-negative)
+    #
+    # When both hold the complementary slackness conditions xj*sj = 0
+    # are satisfied, confirming optimality.
+    # ----------------------------------------------------------
+    if np.min(sN) >= 0:
+        z_min = cB @ xB
+        print("Optimal solution found.")
+        print(f"Basic variable indices B = {B}")
+        print(f"Basic variable values  xB = {xB}")
+        print(f"Min objective value  z = {z_min}")
+        print(f"Max objective value  z = {-z_min}  (negate because max->min)")
+        break
 
-            #After this the loop repeats 
+    # ----------------------------------------------------------
+    # STEP 2 — CHOOSE ENTERING VARIABLE
+    #
+    # Dantzig's rule / Least-element rule:
+    #   Choose the non-basic index l whose reduced cost s_l is the
+    #   most negative (largest improvement per unit step):
+    #       s_l = min { sj : sj < 0,  j in N }
+    #
+    # t  = position of l inside the N list
+    # l  = actual variable index that will ENTER the basis
+    # ----------------------------------------------------------
+    t = int(np.argmin(sN))   # position in N of the most negative reduced cost
+    l = N[t]                 # index of the entering variable x_l
+
+    # Pivot column: hl = AB^{-1} * A_{.l}
+    # hl[i] tells how much the i-th basic variable decreases when x_l increases by 1.
+    hl = AB_inv @ A[:, l]
+
+    # ----------------------------------------------------------
+    # UNBOUNDEDNESS CHECK
+    #
+    # If every component of hl is <= 0, the objective can decrease
+    # without bound along the direction of x_l — the LP is unbounded.
+    # ----------------------------------------------------------
+    if np.max(hl) <= 0:
+        print("Problem is unbounded.")
+        break
+
+    # ----------------------------------------------------------
+    # STEP 2 (cont.) — CHOOSE LEAVING VARIABLE
+    #
+    # Minimum-ratio test:
+    #   Find the basic variable x_{B(r)} that hits zero first as x_l grows:
+    #       x_{B(r)} / h_{rl} = min { xB[i] / hl[i] : hl[i] > 0,  i = 1..m }
+    #
+    # Only rows where hl[i] > 0 are eligible (dividing by <= 0 would
+    # allow the variable to stay non-negative or go to infinity).
+    #
+    # r  = row index of the leaving variable inside B
+    # k  = actual variable index that will LEAVE the basis
+    # ----------------------------------------------------------
+    ratios = np.full(xB.shape, np.inf)   # initialise all ratios to +inf
+    mask = hl > 0                         # only consider positive pivot elements
+    ratios[mask] = xB[mask] / hl[mask]
+
+    r = int(np.argmin(ratios))   # row position of the leaving variable in B
+    k = B[r]                     # index of the leaving variable x_k
+
+    # ----------------------------------------------------------
+    # STEP 3 — PIVOT
+    #
+    # Swap the entering index l into position r of B and
+    # the leaving index k into position t of N.
+    # The next iteration will recompute AB^{-1} from scratch.
+    # ----------------------------------------------------------
+    B[r] = l
+    N[t] = k
+    # Loop continues with the updated basis.
+
+
 
