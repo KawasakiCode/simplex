@@ -29,21 +29,30 @@ import numpy as np
 #        x1, x2, x3, x4 >= 0
 # ----------------------------------------------------------
 
-c = np.array([-3, -1, 0, 0])   # cost vector (negated for max->min)
+prev_pivot = None
+prev_k = None
+prev_sl = None
+
+c = np.array([-100, -10, -1, 0, 0, 0])   # cost vector (negated for max->min)
 
 A = np.array([
-    [1, 1, 1, 0],
-    [2, 1, 0, 1]
+    [1, 0, 0, 1, 0, 0],
+    [20, 1, 0, 0, 1, 0],
+    [200, 20, 1, 0, 0, 1],
 ])
 
-b = np.array([2, 4])
+b = np.array([1, 100,  10000])
 
 # Initial basis: columns 2 and 3 (0-indexed) correspond to the
 # slack variables x3 and x4. AB = I (identity), which is trivially
 # invertible and gives the initial basic feasible solution xB = b >= 0.
-B = [2, 3]   # basis index set  (|B| = m)
-N = [0, 1]   # non-basis index set  (|N| = n - m)
+B = [3, 4, 5]   # basis index set  (|B| = m)
+N = [0, 1, 2]   # non-basis index set  (|N| = n - m)
 
+# Compute the inverse of the basis matrix AB^{-1}
+AB_inv = np.eye(3)
+
+count = 0
 # ----------------------------------------------------------
 # MAIN LOOP — each iteration is one pivot
 # ----------------------------------------------------------
@@ -57,9 +66,6 @@ while True:
     AB = A[:, B]
     AN = A[:, N]
 
-    # Compute the inverse of the basis matrix AB^{-1}
-    AB_inv = np.linalg.inv(AB)
-
     # Current basic feasible solution: xB = AB^{-1} b
     # Non-basic variables are all zero: xN = 0
     xB = AB_inv @ b
@@ -70,6 +76,12 @@ while True:
     # Dual slack variables (reduced costs) for non-basic columns:
     #   sN = (cN)^T - (cB)^T * AB^{-1} * AN
     sN = cN - w_T @ AN
+    if prev_k is not None:
+        sk_new = sN[t]
+        print("Στοιχεια")
+        print(f"Παλιο sL: {prev_sl}")
+        print(f"Pivot element: {prev_pivot}")
+        print(f"Νεο sk: {sk_new}")
 
     # ----------------------------------------------------------
     # STEP 1 — OPTIMALITY TEST
@@ -89,6 +101,7 @@ while True:
         print(f"Basic variable values  xB = {xB}")
         print(f"Min objective value  z = {z_min}")
         print(f"Max objective value  z = {-z_min}  (negate because max->min)")
+        print(f"Iterations: {count}")
         break
 
     # ----------------------------------------------------------
@@ -117,6 +130,7 @@ while True:
     # ----------------------------------------------------------
     if np.max(hl) <= 0:
         print("Problem is unbounded.")
+        print(count)
         break
 
     # ----------------------------------------------------------
@@ -139,6 +153,17 @@ while True:
     r = int(np.argmin(ratios))   # row position of the leaving variable in B
     k = B[r]                     # index of the leaving variable x_k
 
+    #Calculate inverse with E matrix to reduce time
+    m = len(AB_inv)
+    pivot = hl[r]
+
+    E_inv = np.eye(m)
+    E_inv[:, r] = -hl/ pivot
+
+    E_inv[r, r] = 1 / pivot
+
+    AB_inv = E_inv @ AB_inv
+
     # ----------------------------------------------------------
     # STEP 3 — PIVOT
     #
@@ -146,9 +171,14 @@ while True:
     # the leaving index k into position t of N.
     # The next iteration will recompute AB^{-1} from scratch.
     # ----------------------------------------------------------
+    prev_pivot = pivot
+    prev_sl = sN[t]
+    prev_k = k
+
     B[r] = l
     N[t] = k
     # Loop continues with the updated basis.
+    count += 1
 
 
 
