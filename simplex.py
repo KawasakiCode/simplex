@@ -1,184 +1,221 @@
 import numpy as np
 
 # ============================================================
-# REVISED PRIMAL SIMPLEX ALGORITHM
+# Revised simplex-type algorithms for linear programming
+#   - Revised primal simplex            (Lectures 05 / 06)
+#   - Revised dual simplex              (Lecture 07)
+#   - Two-phase method (single          (Lecture 07)
+#     artificial variable)
 #
-# Solves problems in standard form:
-#   min { c^T x : Ax = b, x >= 0 }
+# All problems are solved in standard form:
+#       min { c^T x : A x = b, x >= 0 }
 #
-# For MAX problems: negate c before running, then negate z at
-# the end to recover the true maximum value.
+# For a MAX problem, negate the objective coefficients before
+# solving; the reported minimum z then equals -(max), so the
+# true maximum is -z.
 # ============================================================
 
-# ----------------------------------------------------------
-# STEP 0 — INITIALIZATION
-#
-# Define the problem data and choose an initial basis B.
-# B must index m linearly independent columns of A so that
-# the basis matrix AB = A[:, B] is invertible (rank(AB) = m).
-#
-# This example encodes:   max 3x1 + x2
-#                  s.t.   x1 +  x2 <= 2
-#                         2x1 + x2 <= 4
-#                         x1, x2 >= 0
-#
-# After adding slack variables x3 and x4 the standard form is:
-#   min -3x1 - x2  (c negated to convert max -> min)
-#   s.t. x1 + x2 + x3       = 2
-#        2x1 + x2      + x4  = 4
-#        x1, x2, x3, x4 >= 0
-# ----------------------------------------------------------
 
-prev_pivot = None
-prev_k = None
-prev_sl = None
+def update_basis_inverse(AB_inv, hl, r):
+    """Product-form update of the basis inverse after pivoting on row r.
 
-c = np.array([-100, -10, -1, 0, 0, 0])   # cost vector (negated for max->min)
-
-A = np.array([
-    [1, 0, 0, 1, 0, 0],
-    [20, 1, 0, 0, 1, 0],
-    [200, 20, 1, 0, 0, 1],
-])
-
-b = np.array([1, 100,  10000])
-
-# Initial basis: columns 2 and 3 (0-indexed) correspond to the
-# slack variables x3 and x4. AB = I (identity), which is trivially
-# invertible and gives the initial basic feasible solution xB = b >= 0.
-B = [3, 4, 5]   # basis index set  (|B| = m)
-N = [0, 1, 2]   # non-basis index set  (|N| = n - m)
-
-# Compute the inverse of the basis matrix AB^{-1}
-AB_inv = np.eye(3)
-
-count = 0
-# ----------------------------------------------------------
-# MAIN LOOP — each iteration is one pivot
-# ----------------------------------------------------------
-while True:
-
-    # Partition c and A according to the current basis B and non-basis N.
-    # cB, cN  — cost sub-vectors for basic / non-basic variables
-    # AB, AN  — sub-matrices of A for basic / non-basic columns
-    cB = c[B]
-    cN = c[N]
-    AB = A[:, B]
-    AN = A[:, N]
-
-    # Current basic feasible solution: xB = AB^{-1} b
-    # Non-basic variables are all zero: xN = 0
-    xB = AB_inv @ b
-
-    # Dual variables (shadow prices):  w^T = (cB)^T * AB^{-1}
-    w_T = cB @ AB_inv
-
-    # Dual slack variables (reduced costs) for non-basic columns:
-    #   sN = (cN)^T - (cB)^T * AB^{-1} * AN
-    sN = cN - w_T @ AN
-    if prev_k is not None:
-        sk_new = sN[t]
-        print("Στοιχεια")
-        print(f"Παλιο sL: {prev_sl}")
-        print(f"Pivot element: {prev_pivot}")
-        print(f"Νεο sk: {sk_new}")
-
-    # ----------------------------------------------------------
-    # STEP 1 — OPTIMALITY TEST
-    #
-    # Theorem: the current basic solution (xB, xN=0)
-    # is optimal for the min problem if:
-    #   xB >= 0  (feasibility, guaranteed by construction)  AND
-    #   sN >= 0  (all reduced costs non-negative)
-    #
-    # When both hold the complementary slackness conditions xj*sj = 0
-    # are satisfied, confirming optimality.
-    # ----------------------------------------------------------
-    if np.min(sN) >= 0:
-        z_min = cB @ xB
-        print("Optimal solution found.")
-        print(f"Basic variable indices B = {B}")
-        print(f"Basic variable values  xB = {xB}")
-        print(f"Min objective value  z = {z_min}")
-        print(f"Max objective value  z = {-z_min}  (negate because max->min)")
-        print(f"Iterations: {count}")
-        break
-
-    # ----------------------------------------------------------
-    # STEP 2 — CHOOSE ENTERING VARIABLE
-    #
-    # Dantzig's rule / Least-element rule:
-    #   Choose the non-basic index l whose reduced cost s_l is the
-    #   most negative (largest improvement per unit step):
-    #       s_l = min { sj : sj < 0,  j in N }
-    #
-    # t  = position of l inside the N list
-    # l  = actual variable index that will ENTER the basis
-    # ----------------------------------------------------------
-    t = int(np.argmin(sN))   # position in N of the most negative reduced cost
-    l = N[t]                 # index of the entering variable x_l
-
-    # Pivot column: hl = AB^{-1} * A_{.l}
-    # hl[i] tells how much the i-th basic variable decreases when x_l increases by 1.
-    hl = AB_inv @ A[:, l]
-
-    # ----------------------------------------------------------
-    # UNBOUNDEDNESS CHECK
-    #
-    # If every component of hl is <= 0, the objective can decrease
-    # without bound along the direction of x_l — the LP is unbounded.
-    # ----------------------------------------------------------
-    if np.max(hl) <= 0:
-        print("Problem is unbounded.")
-        print(count)
-        break
-
-    # ----------------------------------------------------------
-    # STEP 2 (cont.) — CHOOSE LEAVING VARIABLE
-    #
-    # Minimum-ratio test:
-    #   Find the basic variable x_{B(r)} that hits zero first as x_l grows:
-    #       x_{B(r)} / h_{rl} = min { xB[i] / hl[i] : hl[i] > 0,  i = 1..m }
-    #
-    # Only rows where hl[i] > 0 are eligible (dividing by <= 0 would
-    # allow the variable to stay non-negative or go to infinity).
-    #
-    # r  = row index of the leaving variable inside B
-    # k  = actual variable index that will LEAVE the basis
-    # ----------------------------------------------------------
-    ratios = np.full(xB.shape, np.inf)   # initialise all ratios to +inf
-    mask = hl > 0                         # only consider positive pivot elements
-    ratios[mask] = xB[mask] / hl[mask]
-
-    r = int(np.argmin(ratios))   # row position of the leaving variable in B
-    k = B[r]                     # index of the leaving variable x_k
-
-    #Calculate inverse with E matrix to reduce time
+    AB_inv_new = E^-1 @ AB_inv  (Lecture 06, "ΑΝΑΝΕΩΣΗ ΤΗΣ ΒΑΣΗΣ").
+    Only the elementary matrix E^-1 is built, avoiding a full re-inversion.
+    """
     m = len(AB_inv)
     pivot = hl[r]
-
     E_inv = np.eye(m)
-    E_inv[:, r] = -hl/ pivot
-
+    E_inv[:, r] = -hl / pivot
     E_inv[r, r] = 1 / pivot
-
-    AB_inv = E_inv @ AB_inv
-
-    # ----------------------------------------------------------
-    # STEP 3 — PIVOT
-    #
-    # Swap the entering index l into position r of B and
-    # the leaving index k into position t of N.
-    # The next iteration will recompute AB^{-1} from scratch.
-    # ----------------------------------------------------------
-    prev_pivot = pivot
-    prev_sl = sN[t]
-    prev_k = k
-
-    B[r] = l
-    N[t] = k
-    # Loop continues with the updated basis.
-    count += 1
+    return E_inv @ AB_inv
 
 
+def simplex(c, A, b, B, N, AB_inv):
+    """Revised primal simplex algorithm (Lecture 06).
 
+    Starts from a primal-feasible basis (xB >= 0) and returns the optimal
+    partition, or None if the problem is unbounded.
+    """
+    while True:
+        # Step 0 quantities for the current basis [B, N]
+        cB, cN, AN = c[B], c[N], A[:, N]
+        xB = AB_inv @ b                 # basic variable values
+        w_T = cB @ AB_inv               # dual variables   w^T = cB^T AB^-1
+        sN = cN - w_T @ AN              # reduced costs    sN = cN^T - w^T AN
+
+        # Step 1 - optimality test:  sN >= 0  =>  optimal
+        if np.min(sN) >= 0:
+            return B, N, xB, AB_inv
+
+        # Step 2 - entering variable (Dantzig rule: most negative reduced cost)
+        t = int(np.argmin(sN))
+        l = N[t]
+        hl = AB_inv @ A[:, l]           # pivot column  hl = AB^-1 A_.l
+
+        # Unboundedness check: hl <= 0 means x_l can grow without bound
+        if np.max(hl) <= 0:
+            print("Problem is unbounded.")
+            return None
+
+        # Step 2 - leaving variable (minimum-ratio test over hl[i] > 0)
+        ratios = np.full(xB.shape, np.inf)
+        mask = hl > 0
+        ratios[mask] = xB[mask] / hl[mask]
+        r = int(np.argmin(ratios))
+        k = B[r]
+
+        # Step 3 - pivot: x_l enters, x_k leaves; refresh the basis inverse
+        AB_inv = update_basis_inverse(AB_inv, hl, r)
+        B[r], N[t] = l, k
+
+
+def dual_simplex(c, A, b, B, N, AB_inv):
+    """Revised dual simplex algorithm (Lecture 07).
+
+    Starts from a dual-feasible basis (sN >= 0) and returns the optimal
+    partition, or None if the primal problem is infeasible.
+    """
+    while True:
+        # Step 0 quantities for the current basis [B, N]
+        cB, cN, AN = c[B], c[N], A[:, N]
+        xB = AB_inv @ b
+        w_T = cB @ AB_inv
+        sN = cN - w_T @ AN
+
+        # Step 1 - optimality test:  xB >= 0  =>  optimal
+        if np.min(xB) >= 0:
+            return B, N, xB, AB_inv
+
+        # Step 2 - leaving variable (most negative basic variable)
+        r = int(np.argmin(xB))
+        k = B[r]
+        H_rN = AB_inv[r, :] @ AN        # pivot row  H_rN = AB^-1(r) AN
+
+        # H_rN >= 0  =>  dual unbounded, primal infeasible
+        if np.min(H_rN) >= 0:
+            print("Primal problem is infeasible (dual is unbounded).")
+            return None
+
+        # Step 2 - entering variable (dual ratio test over H_rj < 0)
+        ratios = np.full(sN.shape, np.inf)
+        mask = H_rN < 0
+        ratios[mask] = -sN[mask] / H_rN[mask]
+        t = int(np.argmin(ratios))
+        l = N[t]
+
+        # Step 3 - pivot: x_l enters, x_k leaves; refresh the basis inverse
+        hl = AB_inv @ A[:, l]
+        AB_inv = update_basis_inverse(AB_inv, hl, r)
+        B[r], N[t] = l, k
+
+
+def two_phase_simplex(c, A, b, B, N, AB_inv):
+    """Two-phase method with a single artificial variable (Lecture 07).
+
+    Phase I solves a modified problem (T.G.P.) that drives the artificial
+    variable to zero; Phase II solves the original problem (A.G.P.) from the
+    feasible basis produced by Phase I.
+    """
+    m = len(B)
+    n = A.shape[1]                      # number of structural variables
+    art = n                            # index of the artificial variable x_{n+1}
+
+    # --- Step 0: build the modified problem (T.G.P.) ---
+    # Artificial column d = -A_B e, so that AB^-1 d = -e (an all-ones, all-negative
+    # pivot column). The Phase I objective minimises only the artificial variable.
+    AB = A[:, B]
+    d = (-AB @ np.ones(m)).reshape(-1, 1)
+    A = np.hstack([A, d])
+    c = np.append(c, 0.0)
+    f = np.zeros(n + 1)
+    f[art] = 1.0
+
+    # --- Step 1: pivot the artificial variable into the basis ---
+    # Leaving variable: the most infeasible basic variable (smallest xB[i]).
+    xB = AB_inv @ b
+    r = int(np.argmin(xB))
+    k = B[r]
+    hl = AB_inv @ A[:, art]
+    AB_inv = update_basis_inverse(AB_inv, hl, r)
+    B[r] = art
+    N = np.append(N, k)
+
+    # --- Step 2: Phase I (solve the T.G.P. with the primal simplex) ---
+    B, N, xB, AB_inv = simplex(f, A, b, B, N, AB_inv)
+
+    # --- Transition to Phase II ---
+    if art in B:
+        idx = list(B).index(art)
+        if xB[idx] > 1e-9:
+            # x_{n+1} > 0 at the optimum: the original problem is infeasible.
+            print("Problem is infeasible.")
+            return None
+        # x_{n+1} = 0 but still basic: pivot it out, any eligible variable enters.
+        row = AB_inv[idx, :] @ A[:, N]
+        t = next(j for j, h in enumerate(row) if abs(h) > 1e-9)
+        l = N[t]
+        hl = AB_inv @ A[:, l]
+        AB_inv = update_basis_inverse(AB_inv, hl, idx)
+        B[idx] = l
+        N = np.delete(N, t)
+    else:
+        # x_{n+1} is already non-basic: simply drop it from N.
+        N = N[N != art]
+
+    # --- Step 3: Phase II (solve the original A.G.P. with the primal simplex) ---
+    return simplex(c, A, b, B, N, AB_inv)
+
+
+# ============================================================
+# PROBLEM DATA  --  edit this block for your own problem
+#
+# Put the problem in standard form first:  min c^T x, A x = b, x >= 0.
+# Add slack/surplus variables yourself so every constraint is an equality.
+# For a MAX problem, negate the objective coefficients here (max = -z).
+#
+# Example:  max 3x1 + 2x2
+#           s.t.  x1 +  x2 <= 4
+#                2x1 +  x2 <= 5,   x1, x2 >= 0
+# Adding slacks x3, x4 and negating the objective (max -> min):
+#   min -3x1 - 2x2
+#   s.t. x1 +  x2 + x3      = 4
+#       2x1 +  x2      + x4 = 5,   x1..x4 >= 0
+# ============================================================
+
+c = np.array([-3.0, -2.0, 0.0, 0.0])          # objective coefficients
+A = np.array([[1.0, 1.0, 1.0, 0.0],           # constraint matrix
+              [2.0, 1.0, 0.0, 1.0]])
+b = np.array([4.0, 5.0])                       # right-hand side
+
+# Initial basis / non-basis index sets (0-indexed columns of A).
+# Here the slack columns x3, x4 give an identity basis (AB = I).
+B = [2, 3]                                     # basic variable indices
+N = [0, 1]                                     # non-basic variable indices
+
+# ----------------------------------------------------------
+# Driver: pick the right algorithm from the initial partition
+# ----------------------------------------------------------
+AB_inv = np.linalg.inv(A[:, B])
+xB = AB_inv @ b
+sN = c[N] - (c[B] @ AB_inv) @ A[:, N]
+
+if np.min(xB) >= 0 and np.min(sN) >= 0:
+    print("Initial basis is already optimal.")
+    result = (B, N, xB, AB_inv)
+elif np.min(xB) >= 0:
+    print("Using primal simplex.")
+    result = simplex(c, A, b, B, N, AB_inv)
+elif np.min(sN) >= 0:
+    print("Using dual simplex.")
+    result = dual_simplex(c, A, b, B, N, AB_inv)
+else:
+    print("Using two-phase method.")
+    result = two_phase_simplex(c, A, b, B, N, AB_inv)
+
+if result is not None:
+    B, N, xB, AB_inv = result
+    z = c[B] @ xB
+    print("Optimal solution found.")
+    print(f"Basis B = {list(B)}")
+    print(f"xB = {xB}")
+    print(f"Min objective z = {z}   (max = {-z})")
